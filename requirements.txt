@@ -1,0 +1,8 @@
+ipykernel
+python-dotenv
+yt-dlp
+openpyxl
+pandas
+tk
+
+
