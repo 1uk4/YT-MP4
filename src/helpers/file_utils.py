@@ -17,3 +17,4 @@ def add_metadata(file_path, title, artist):
         # Replace original file with the one containing metadata
         if os.path.exists(temp_file):
             os.replace(temp_file, file_path)
+

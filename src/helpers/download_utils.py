@@ -10,6 +10,13 @@ def update_progress(progress_bar, progress_text, current, total, root):
     progress_text.config(text=f"{percentage}% ({current}/{total} Songs)")
     root.update_idletasks()
 
+def format_title_proper(text):
+    """ Capitalizes each word except small words like 'of', 'the', 'and'. """
+    small_words = {"of", "the", "and", "in", "on", "at", "a", "an", "to"}
+    words = text.split()
+    return " ".join([word.capitalize() if word.lower() not in small_words else word.lower() for word in words])
+
+
 def download_music(file_path, folder_path, status_text, progress_bar, progress_text, root, add_metadata):
     try:
         sheets_dict = pd.read_excel(file_path, sheet_name=None)
@@ -31,7 +38,8 @@ def download_music(file_path, folder_path, status_text, progress_bar, progress_t
                     update_progress(progress_bar, progress_text, downloaded_count, total_songs, root)
                     continue
 
-                output_filename = f"{song_name} ({artist})"
+
+                output_filename = f"{format_title_proper(song_name)} ({format_title_proper(artist)})"
                 output_path = os.path.join(playlist_path, output_filename)
 
                 if glob.glob(f"{output_path}*.mp3"):
