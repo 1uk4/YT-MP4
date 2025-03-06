@@ -19,15 +19,19 @@ def format_title_proper(text):
 
 def download_music(file_path, folder_path, status_text, progress_bar, progress_text, root, add_metadata):
     try:
-        sheets_dict = pd.read_excel(file_path, sheet_name=None)
-        total_songs = sum(len(df) for df in sheets_dict.values())
+        # Read single sheet excel file
+        df = pd.read_excel(file_path)
+        total_songs = len(df)
         downloaded_count = 0
 
-        for playlist_name, df in sheets_dict.items():
+        # Create a dictionary to group songs by playlist
+        playlist_groups = df.groupby("Playlist")
+
+        for playlist_name, playlist_df in playlist_groups:
             playlist_path = os.path.join(folder_path, playlist_name)
             os.makedirs(playlist_path, exist_ok=True)
 
-            for _, row in df.iterrows():
+            for _, row in playlist_df.iterrows():
                 song_name = str(row["Song Name"]).strip()
                 artist = str(row["Artist"]).strip()
                 youtube_url = str(row["YT Link"]).strip()
