@@ -1,83 +1,130 @@
 import os
-import pandas as pd
-import yt_dlp
-import glob
-
-def update_progress(progress_bar, progress_text, current, total, root):
-    """ Updates the progress bar and percentage text """
-    percentage = int((current / total) * 100)
-    progress_bar["value"] = percentage
-    progress_text.config(text=f"{percentage}% ({current}/{total} Songs)")
-    root.update_idletasks()
-
-def format_title_proper(text):
-    """ Capitalizes each word except small words like 'of', 'the', 'and'. """
-    small_words = {"of", "the", "and", "in", "on", "at", "a", "an", "to"}
-    words = text.split()
-    return " ".join([word.capitalize() if word.lower() not in small_words else word.lower() for word in words])
+import tkinter as tk
+import threading
+import subprocess
+from tkinter import filedialog, messagebox, ttk
+from helpers import add_metadata, download_music
 
 
-def download_music(file_path, folder_path, status_text, progress_bar, progress_text, root, add_metadata):
-    try:
-        # Read single sheet excel file
-        df = pd.read_excel(file_path)
-        total_songs = len(df)
-        downloaded_count = 0
+class MusicDownloaderApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Music Downloader")
+        self.root.geometry("600x450")
 
-        # Create a dictionary to group songs by playlist
-        playlist_groups = df.groupby("Playlist")
+        self.skip_current = False
+        self.download_in_progress = False
 
-        for playlist_name, playlist_df in playlist_groups:
-            playlist_path = os.path.join(folder_path, playlist_name)
-            os.makedirs(playlist_path, exist_ok=True)
+        self.setup_gui()
 
-            for _, row in playlist_df.iterrows():
-                song_name = str(row["Song Name"]).strip()
-                artist = str(row["Artist"]).strip()
-                youtube_url = str(row["YT Link"]).strip()
+    def setup_gui(self):
+        self.file_label = tk.Label(self.root, text="Select Excel File:")
+        self.file_label.pack(pady=5)
+        self.file_button = tk.Button(self.root, text="Choose File", command=self.select_file)
+        self.file_button.pack(pady=5)
+        self.file_path = tk.StringVar()
+        self.file_entry = tk.Entry(self.root, textvariable=self.file_path, width=50)
+        self.file_entry.pack(pady=5)
 
-                if pd.isna(youtube_url) or youtube_url == "":
-                    status_text.insert("end", f"Skipping {song_name} by {artist} (No URL provided)\n")
-                    downloaded_count += 1
-                    update_progress(progress_bar, progress_text, downloaded_count, total_songs, root)
-                    continue
+        self.folder_label = tk.Label(self.root, text="Select Download Folder:")
+        self.folder_label.pack(pady=5)
+        self.folder_button = tk.Button(self.root, text="Choose Folder", command=self.select_folder)
+        self.folder_button.pack(pady=5)
+        self.folder_path = tk.StringVar()
+        self.folder_entry = tk.Entry(self.root, textvariable=self.folder_path, width=50)
+        self.folder_entry.pack(pady=5)
 
+        self.button_frame = tk.Frame(self.root)
+        self.button_frame.pack(pady=10)
 
-                output_filename = f"{format_title_proper(song_name)} ({format_title_proper(artist)})"
-                output_path = os.path.join(playlist_path, output_filename)
+        self.download_button = tk.Button(self.button_frame, text="Start Download", command=self.start_download)
+        self.download_button.pack(side=tk.LEFT, padx=5)
 
-                if glob.glob(f"{output_path}*.mp3"):
-                    status_text.insert("end", f"Skipping {output_filename}, already downloaded.\n")
-                    downloaded_count += 1
-                    update_progress(progress_bar, progress_text, downloaded_count, total_songs, root)
-                    continue
+        self.skip_button = tk.Button(self.button_frame, text="Skip Current", command=self.skip_song, state=tk.DISABLED)
+        self.skip_button.pack(side=tk.LEFT, padx=5)
 
-                ydl_opts = {
-                    "format": "bestaudio/best",
-                    "outtmpl": f"{output_path}.%(ext)s",
-                    "quiet": True,
-                    "no-warnings": True,
-                    "cookies-from-browser": "chrome",
-                    "postprocessors": [{
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }],
-                }
+        self.open_folder_button = tk.Button(self.button_frame, text="Open in Finder", command=self.open_download_folder)
+        self.open_folder_button.pack(side=tk.LEFT, padx=5)
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([youtube_url])
+        self.progress_label = tk.Label(self.root, text="Download Progress:")
+        self.progress_label.pack(pady=5)
+        self.progress_bar = ttk.Progressbar(self.root, length=400, mode="determinate")
+        self.progress_bar.pack(pady=5)
+        self.progress_text = tk.Label(self.root, text="0%")
+        self.progress_text.pack()
 
-                mp3_file = f"{output_path}.mp3"
-                add_metadata(mp3_file, song_name, artist)
+        self.status_text = tk.Text(self.root, height=10, width=50)
+        self.status_text.pack(pady=10, padx=10)
+        self.status_text.insert(tk.END, "Status: Waiting for user input...\n")
 
-                status_text.insert("end", f"✅ Downloaded: {output_filename}.mp3\n")
+    def select_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx")])
+        self.file_path.set(file_path)
 
-                downloaded_count += 1
-                update_progress(progress_bar, progress_text, downloaded_count, total_songs, root)
+    def select_folder(self):
+        folder_path = filedialog.askdirectory()
+        self.folder_path.set(folder_path)
 
-        status_text.insert("end", "\n🎉 Download process completed!\n")
-        update_progress(progress_bar, progress_text, total_songs, total_songs, root)  # Set progress to 100%
+    def open_download_folder(self):
+        folder_path = self.folder_path.get()
 
-    except Exception as e:
-        status_text.insert("end", f"\n❌ Error: {e}\n")
+        if not folder_path or not os.path.exists(folder_path):
+            messagebox.showerror("Error", "Please select a valid download folder.")
+            return
+
+        if os.name == "nt":
+            subprocess.run(["explorer", folder_path], shell=True)
+        elif os.name == "posix":
+            if "darwin" in os.uname().sysname.lower():
+                subprocess.run(["open", folder_path])
+            else:
+                subprocess.run(["xdg-open", folder_path])
+
+    def skip_song(self):
+        if self.download_in_progress:
+            self.skip_current = True
+            self.status_text.insert(tk.END, "⏭️ Skipping current song...\n")
+            self.root.update()
+
+    def start_download(self):
+        file_path = self.file_path.get()
+        folder_path = self.folder_path.get()
+
+        if not file_path or not folder_path:
+            messagebox.showerror("Error", "Please select an Excel file and download folder.")
+            return
+
+        self.download_in_progress = True
+        self.skip_current = False
+        self.skip_button.config(state=tk.NORMAL)
+        self.download_button.config(state=tk.DISABLED)
+
+        self.status_text.insert(tk.END, "Starting download process...\n")
+        thread = threading.Thread(target=self._download_thread)
+        thread.start()
+
+    def _download_thread(self):
+        try:
+            self.root.after(0, lambda: self.skip_button.config(state=tk.NORMAL))
+
+            success = download_music(
+                self.file_path.get(),
+                self.folder_path.get(),
+                self.status_text,
+                self.progress_bar,
+                self.progress_text,
+                self.root,
+                add_metadata
+            )
+
+            if success:
+                self.status_text.insert("end", "\n🎉 Download process completed!\n")
+
+        except Exception as e:
+            self.status_text.insert(tk.END, f"Error: {str(e)}\n")
+            return
+        finally:
+            self.download_in_progress = False
+            self.root.after(0, lambda: self.skip_button.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.download_button.config(state=tk.NORMAL))
+            self.skip_current = False
