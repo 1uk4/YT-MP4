@@ -1,10 +1,10 @@
-import os
 import tkinter as tk
 import threading
-import subprocess
 from tkinter import filedialog, messagebox, ttk
-from helpers.download_utils import download_music  # Changed import
-from helpers.metadata_utils import add_metadata  
+import os
+import subprocess
+from helpers.download_utils import download_music
+from helpers.metadata_utils import add_metadata
 
 class MusicDownloaderApp:
     def __init__(self, root):
@@ -100,30 +100,29 @@ class MusicDownloaderApp:
         thread = threading.Thread(target=self.download_thread)
         thread.start()
 
-def download_thread(self):
-    try:
-        # Enable skip button during download
-        self.root.after(0, lambda: self.skip_button.config(state=tk.NORMAL))
+    def download_thread(self):
+        try:
+            self.root.after(0, lambda: self.skip_button.config(state=tk.NORMAL))
+            
+            success = download_music(
+                self.file_path.get(),
+                self.folder_path.get(),
+                self.status_text,
+                self.progress_bar,
+                self.progress_text,
+                self.root,
+                add_metadata
+            )
+            
+            if success:
+                self.status_text.insert("end", "\n🎉 Download process completed!\n")
         
-        success = download_music(
-            self.file_path.get(),
-            self.folder_path.get(),
-            self.status_text,
-            self.progress_bar,
-            self.progress_text,
-            self.root,
-            add_metadata
-        )
-        
-        if success:  # Only show completion if all downloads finished
-            self.status_text.insert("end", "\n🎉 Download process completed!\n")
-        
-    except Exception as e:
-        self.status_text.insert(tk.END, f"Error: {str(e)}\n")
-        return
-    finally:
-        # Reset buttons and flags when download completes
-        self.download_in_progress = False
-        self.root.after(0, lambda: self.skip_button.config(state=tk.DISABLED))
-        self.root.after(0, lambda: self.download_button.config(state=tk.NORMAL))
-        self.skip_current = False
+        except Exception as e:
+            self.status_text.insert(tk.END, f"Error: {str(e)}\n")
+            return
+
+        finally:
+            self.download_in_progress = False
+            self.root.after(0, lambda: self.skip_button.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.download_button.config(state=tk.NORMAL))
+            self.skip_current = False

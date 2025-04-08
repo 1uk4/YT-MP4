@@ -1,130 +1,136 @@
 import os
+import pandas as pd
 import tkinter as tk
-import threading
-import subprocess
-from tkinter import filedialog, messagebox, ttk
-from helpers import add_metadata, download_music
+from .metadata_utils import add_metadata
+import time
+import yt_dlp
 
+def safe_str(value):
+    """Convert any value to string safely"""
+    if pd.isna(value):  # Check for NaN/empty values
+        return ''
+    return str(value).strip()
 
-class MusicDownloaderApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Music Downloader")
-        self.root.geometry("600x450")
+def sanitize_filename(filename):
+    """Remove or replace invalid characters for filenames"""
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename = filename.replace(char, '_')
+    return filename
 
-        self.skip_current = False
-        self.download_in_progress = False
+def get_safe_filepath(title, artist, playlist_folder):
+    """Create filename in format 'Song Name (Artist).mp3'"""
+    safe_title = sanitize_filename(title)
+    safe_artist = sanitize_filename(artist)
+    filename = f"{safe_title} ({safe_artist}).mp3"
+    return os.path.join(playlist_folder, filename)
 
-        self.setup_gui()
+def download_with_ytdlp(url, output_path, filename):
+    """Download using yt-dlp"""
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(output_path, filename),
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'quiet': True,
+        'no_warnings': True
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
-    def setup_gui(self):
-        self.file_label = tk.Label(self.root, text="Select Excel File:")
-        self.file_label.pack(pady=5)
-        self.file_button = tk.Button(self.root, text="Choose File", command=self.select_file)
-        self.file_button.pack(pady=5)
-        self.file_path = tk.StringVar()
-        self.file_entry = tk.Entry(self.root, textvariable=self.file_path, width=50)
-        self.file_entry.pack(pady=5)
+def download_music(excel_path, download_folder, status_text, progress_bar, progress_text, root, add_metadata_func):
+    try:
+        # Read the Excel file
+        status_text.insert(tk.END, "Reading Excel file...\n")
+        df = pd.read_excel(excel_path)
+        status_text.insert(tk.END, f"Found {len(df)} rows\n")
+        status_text.insert(tk.END, f"Columns found: {', '.join(df.columns)}\n")
+        
+        total_songs = len(df)
+        
+        for index, row in df.iterrows():
+            # Safely convert values to strings
+            title = safe_str(row.get('Song Name', ''))
+            artist = safe_str(row.get('Artist', ''))
+            url = safe_str(row.get('YT Link', ''))
+            playlist = safe_str(row.get('Playlist', 'Default'))
+            
+            if not url or not title or not artist:
+                status_text.insert(tk.END, f"❌ Skipping row {index + 1}: Missing required information\n")
+                continue
 
-        self.folder_label = tk.Label(self.root, text="Select Download Folder:")
-        self.folder_label.pack(pady=5)
-        self.folder_button = tk.Button(self.root, text="Choose Folder", command=self.select_folder)
-        self.folder_button.pack(pady=5)
-        self.folder_path = tk.StringVar()
-        self.folder_entry = tk.Entry(self.root, textvariable=self.folder_path, width=50)
-        self.folder_entry.pack(pady=5)
+            try:
+                # Create playlist folder if it doesn't exist
+                playlist_folder = os.path.join(download_folder, sanitize_filename(playlist))
+                os.makedirs(playlist_folder, exist_ok=True)
 
-        self.button_frame = tk.Frame(self.root)
-        self.button_frame.pack(pady=10)
+                # Check if file already exists
+                expected_file_path = get_safe_filepath(title, artist, playlist_folder)
+                if os.path.exists(expected_file_path):
+                    status_text.insert(tk.END, f"⏭️ Skipping '{title} ({artist})' - Already exists\n")
+                    
+                    # Update progress for skipped file
+                    progress = (index + 1) / total_songs * 100
+                    progress_bar['value'] = progress
+                    progress_text.config(text=f"{progress:.1f}%")
+                    root.update()
+                    continue
 
-        self.download_button = tk.Button(self.button_frame, text="Start Download", command=self.start_download)
-        self.download_button.pack(side=tk.LEFT, padx=5)
+                # Update status
+                status_text.insert(tk.END, f"\nDownloading: {title} ({artist})\n")
+                root.update()
+                
+                # Download using yt-dlp
+                temp_filename = f"temp_{sanitize_filename(title)}"
+                success, error = download_with_ytdlp(url, playlist_folder, temp_filename)
 
-        self.skip_button = tk.Button(self.button_frame, text="Skip Current", command=self.skip_song, state=tk.DISABLED)
-        self.skip_button.pack(side=tk.LEFT, padx=5)
+                if not success:
+                    status_text.insert(tk.END, f"❌ Download failed for '{title} ({artist})': {error}\n")
+                    continue
 
-        self.open_folder_button = tk.Button(self.button_frame, text="Open in Finder", command=self.open_download_folder)
-        self.open_folder_button.pack(side=tk.LEFT, padx=5)
-
-        self.progress_label = tk.Label(self.root, text="Download Progress:")
-        self.progress_label.pack(pady=5)
-        self.progress_bar = ttk.Progressbar(self.root, length=400, mode="determinate")
-        self.progress_bar.pack(pady=5)
-        self.progress_text = tk.Label(self.root, text="0%")
-        self.progress_text.pack()
-
-        self.status_text = tk.Text(self.root, height=10, width=50)
-        self.status_text.pack(pady=10, padx=10)
-        self.status_text.insert(tk.END, "Status: Waiting for user input...\n")
-
-    def select_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx")])
-        self.file_path.set(file_path)
-
-    def select_folder(self):
-        folder_path = filedialog.askdirectory()
-        self.folder_path.set(folder_path)
-
-    def open_download_folder(self):
-        folder_path = self.folder_path.get()
-
-        if not folder_path or not os.path.exists(folder_path):
-            messagebox.showerror("Error", "Please select a valid download folder.")
-            return
-
-        if os.name == "nt":
-            subprocess.run(["explorer", folder_path], shell=True)
-        elif os.name == "posix":
-            if "darwin" in os.uname().sysname.lower():
-                subprocess.run(["open", folder_path])
-            else:
-                subprocess.run(["xdg-open", folder_path])
-
-    def skip_song(self):
-        if self.download_in_progress:
-            self.skip_current = True
-            self.status_text.insert(tk.END, "⏭️ Skipping current song...\n")
-            self.root.update()
-
-    def start_download(self):
-        file_path = self.file_path.get()
-        folder_path = self.folder_path.get()
-
-        if not file_path or not folder_path:
-            messagebox.showerror("Error", "Please select an Excel file and download folder.")
-            return
-
-        self.download_in_progress = True
-        self.skip_current = False
-        self.skip_button.config(state=tk.NORMAL)
-        self.download_button.config(state=tk.DISABLED)
-
-        self.status_text.insert(tk.END, "Starting download process...\n")
-        thread = threading.Thread(target=self._download_thread)
-        thread.start()
-
-    def _download_thread(self):
-        try:
-            self.root.after(0, lambda: self.skip_button.config(state=tk.NORMAL))
-
-            success = download_music(
-                self.file_path.get(),
-                self.folder_path.get(),
-                self.status_text,
-                self.progress_bar,
-                self.progress_text,
-                self.root,
-                add_metadata
-            )
-
-            if success:
-                self.status_text.insert("end", "\n🎉 Download process completed!\n")
-
-        except Exception as e:
-            self.status_text.insert(tk.END, f"Error: {str(e)}\n")
-            return
-        finally:
-            self.download_in_progress = False
-            self.root.after(0, lambda: self.skip_button.config(state=tk.DISABLED))
-            self.root.after(0, lambda: self.download_button.config(state=tk.NORMAL))
-            self.skip_current = False
+                # Get the downloaded file (yt-dlp adds .mp3 extension)
+                temp_file = os.path.join(playlist_folder, temp_filename + '.mp3')
+                
+                if os.path.exists(temp_file):
+                    # Rename to final filename
+                    os.rename(temp_file, expected_file_path)
+                    
+                    # Add metadata
+                    add_metadata_func(expected_file_path, title, artist)
+                    
+                    # Update progress
+                    progress = (index + 1) / total_songs * 100
+                    progress_bar['value'] = progress
+                    progress_text.config(text=f"{progress:.1f}%")
+                    root.update()
+                    
+                    status_text.insert(tk.END, f"✅ Successfully downloaded: {title} ({artist})\n")
+                else:
+                    status_text.insert(tk.END, f"❌ Failed to download '{title} ({artist})'\n")
+                
+            except Exception as e:
+                status_text.insert(tk.END, f"❌ Error processing '{title} ({artist})': {str(e)}\n")
+                # Cleanup any partial downloads
+                if os.path.exists(expected_file_path):
+                    try:
+                        os.remove(expected_file_path)
+                    except:
+                        pass
+                continue
+            
+        return True
+        
+    except pd.errors.EmptyDataError:
+        status_text.insert(tk.END, "❌ Error: Excel file is empty\n")
+        return False
+    except Exception as e:
+        status_text.insert(tk.END, f"❌ Error reading Excel file: {str(e)}\n")
+        return False
