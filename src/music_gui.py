@@ -5,6 +5,7 @@ import os
 import subprocess
 from helpers.download_utils import download_music
 from helpers.metadata_utils import add_metadata
+import os.path
 
 class MusicDownloaderApp:
     def __init__(self, root):
@@ -14,20 +15,26 @@ class MusicDownloaderApp:
 
         self.skip_current = False
         self.download_in_progress = False
-
+        
+        # Set default file path to Music.xlsx in the code directory
+        default_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Music.xlsx")
+        
         self.file_label = tk.Label(root, text="Select Excel File:")
         self.file_label.pack(pady=5)
         self.file_button = tk.Button(root, text="Choose File", command=self.select_file)
         self.file_button.pack(pady=5)
-        self.file_path = tk.StringVar()
+        self.file_path = tk.StringVar(value=default_file_path)
         self.file_entry = tk.Entry(root, textvariable=self.file_path, width=50)
         self.file_entry.pack(pady=5)
 
+        # Set default folder path to ~/Documents/Music/Stock
+        default_folder_path = os.path.expanduser("~/Documents/Music/Stock")
+        
         self.folder_label = tk.Label(root, text="Select Download Folder:")
         self.folder_label.pack(pady=5)
         self.folder_button = tk.Button(root, text="Choose Folder", command=self.select_folder)
         self.folder_button.pack(pady=5)
-        self.folder_path = tk.StringVar()
+        self.folder_path = tk.StringVar(value=default_folder_path)
         self.folder_entry = tk.Entry(root, textvariable=self.folder_path, width=50)
         self.folder_entry.pack(pady=5)
 
